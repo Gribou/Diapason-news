@@ -1,0 +1,105 @@
+version: "3.5"
+
+x-core-enews: &enews
+  image: registry.asap.dsna.fr/infogenestatique/diapason/diapason-news/${ENEWS_ROOT_URL:-enews}/${ENEWS_IMAGE_TAG:-master}:latest
+  restart: unless-stopped
+  networks:
+    - enews
+  depends_on:
+    - enews_db
+  volumes:
+    - ./media/:/app/api/media/
+    - ./backups/:/app/backups/
+  environment:
+    CONFIG_TYPE: ${CONFIG_TYPE:-''}
+    # ---------------------------------------------------------------
+    DEBUG: "False"
+    SECRET_KEY: ${SECRET_KEY:-clé-bidon-9876543210}
+    # ---------------------------------------------------------------
+    ALLOWED_HOSTS: ${ALLOWED_HOSTS}
+    URL_ROOT: /${ENEWS_ROOT_URL}/
+    INTERNAL_HOSTNAME: ${INTERNAL_HOSTNAME}
+    WEB_PORT: ${WEB_PORT:-8000}
+    # ---------------------------------------------------------------
+    DB_ENGINE: django.db.backends.postgresql
+    DB_NAME: postgres
+    DB_USER: postgres
+    DB_PASSWORD: postgres
+    DB_HOST: enews_db
+    DB_PORT: 5432
+    # ---------------------------------------------------------------
+    EMAIL_BACKEND: django.core.mail.backends.smtp.EmailBackend
+    EMAIL_HOST: ${EMAIL_HOST}
+    EMAIL_PORT: ${EMAIL_PORT}
+    EMAIL_HOST_USER: ${EMAIL_HOST_USER}
+    EMAIL_HOST_PASSWORD: ${EMAIL_HOST_PASSWORD}
+    EMAIL_USE_TLS: ${EMAIL_USE_TLS:-False}
+    EMAIL_ADMIN: ${EMAIL_ADMIN}
+    # ---------------------------------------------------------------
+    ENEWS_SU_USERNAME: ${SU_USERNAME:-admin}
+    ENEWS_SU_PASSWORD: ${SU_PASSWORD:-*@dm1n*}
+    ENEWS_SU_EMAIL: ${EMAIL_ADMIN}
+    CELERY_BROKER_URL: redis://enews_redis:6379
+    CELERY_QUEUE: enews
+
+services:
+  enews_web:
+    <<: *enews    
+    entrypoint: /bin/bash /app/scripts/wait-for-migrations.sh && /app/scripts/entrypoint.sh
+    healthcheck:
+      test: /bin/bash /app/scripts/healthcheck.sh
+      start_period: 60s
+      interval: 20s
+
+  enews_celery:
+    <<: *enews
+    depends_on:
+      - enews_redis
+    entrypoint: /bin/bash /app/scripts/migrate.sh && /app/scripts/celery.sh
+    healthcheck:
+        test: celery inspect ping
+        start_period: 15s
+
+  enews_redis:
+    image: redis:alpine
+    restart: unless-stopped
+    networks:
+      - enews
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli ping | grep PONG"]
+      interval: 10s
+
+  enews_db:
+    image: postgres:14-alpine
+    restart: unless-stopped
+    networks:
+      - enews
+    volumes:
+      - enews_psql_data:/var/lib/postgresql/data/
+    environment:
+      POSTGRES_DB: postgres
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+
+  nginx:
+    image: nginx:alpine
+    restart: unless-stopped
+    ports:
+      - 80:80
+    networks:
+      - enews
+    volumes:
+      - ./nginx.conf.template:/etc/nginx/templates/default.conf.template
+      - ./media/:/app/api/media/
+    environment:
+      ALLOWED_HOSTS: ${ALLOWED_HOSTS:-localhost}
+      WEB_PORT: ${WEB_PORT:-8000}
+
+volumes:
+  enews_psql_data:
+
+networks:
+  enews:
