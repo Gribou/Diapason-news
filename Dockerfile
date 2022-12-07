@@ -1,7 +1,7 @@
 ARG GITLAB_DEPENDENCY_PROXY=""
 # improve build time by pulling images from gitlab and not dockerhub
 
-FROM node:17-alpine AS front-builder
+FROM node:14 AS front-builder
 
 ARG PROJECT_DIR=/app/
 ARG ASSETS_DIR=/app/web/
